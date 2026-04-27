@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/aleksclark/crush-a2a/internal/server"
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/aleksclark/crush-a2a/internal/crush"
+	"github.com/aleksclark/crush-a2a/internal/executor"
 )
 
 func main() {
@@ -28,17 +31,48 @@ func main() {
 
 	baseURL := fmt.Sprintf("http://localhost:%d", *port)
 
-	srv, err := server.New(server.Config{
-		Port:          *port,
-		CrushAddr:     *crushAddr,
-		WorkspacePath: *workspacePath,
-		BaseURL:       baseURL,
-		Logger:        logger,
-	})
+	client, err := crush.NewClient(*crushAddr, logger)
 	if err != nil {
-		logger.Error("failed to create server", "error", err)
+		logger.Error("failed to create crush client", "error", err)
 		os.Exit(1)
 	}
+
+	exec := &executor.CrushExecutor{
+		Crush:         client,
+		WorkspacePath: *workspacePath,
+		Logger:        logger,
+	}
+
+	capabilities := a2a.AgentCapabilities{Streaming: true}
+
+	agentCard := &a2a.AgentCard{
+		Name:        "crush",
+		Version:     "1.0.0",
+		Description: "Crush AI assistant exposed via A2A v1.0 protocol",
+		Capabilities: capabilities,
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(baseURL, a2a.TransportProtocolJSONRPC),
+		},
+		DefaultInputModes:  []string{"text"},
+		DefaultOutputModes: []string{"text"},
+		Skills: []a2a.AgentSkill{
+			{
+				ID:          "general",
+				Name:        "General Assistant",
+				Description: "General-purpose AI assistant powered by Crush",
+				Tags:        []string{"general", "coding", "assistant"},
+			},
+		},
+	}
+
+	requestHandler := a2asrv.NewHandler(exec,
+		a2asrv.WithLogger(logger),
+		a2asrv.WithCapabilityChecks(&capabilities),
+	)
+
+	mux := http.NewServeMux()
+	mux.Handle("/", a2asrv.NewJSONRPCHandler(requestHandler))
+	mux.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewStaticAgentCardHandler(agentCard))
 
 	addr := fmt.Sprintf(":%d", *port)
 	logger.Info("starting crush-a2a server",
@@ -47,7 +81,7 @@ func main() {
 		"workspace_path", *workspacePath,
 	)
 
-	if err := http.ListenAndServe(addr, srv); err != nil {
+	if err := http.ListenAndServe(addr, mux); err != nil {
 		logger.Error("server failed", "error", err)
 		os.Exit(1)
 	}

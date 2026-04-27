@@ -1,44 +1,27 @@
 package bridge
 
 import (
-	"strings"
-	"time"
-
-	"github.com/aleksclark/crush-a2a/internal/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/aleksclark/crush-a2a/internal/crush"
-	"github.com/google/uuid"
 )
 
-// NormalizeRole accepts both v0.3 ("user"/"agent") and v1.0 ("ROLE_USER"/"ROLE_AGENT")
-// role names on input and returns the canonical v1.0 form.
-func NormalizeRole(role string) string {
-	switch strings.ToLower(role) {
-	case "user", "role_user":
-		return a2a.RoleUser
-	case "agent", "role_agent":
-		return a2a.RoleAgent
-	default:
-		return role
-	}
-}
-
-// ExtractPromptText extracts the plain text from A2A message parts.
-func ExtractPromptText(parts []a2a.Part) string {
+// ExtractPromptText extracts the plain text from SDK message parts.
+func ExtractPromptText(parts a2a.ContentParts) string {
 	var text string
 	for _, p := range parts {
-		if p.Text != "" {
+		if t := p.Text(); t != "" {
 			if text != "" {
 				text += "\n"
 			}
-			text += p.Text
+			text += t
 		}
 	}
 	return text
 }
 
-// CrushMessagesToA2AArtifacts converts Crush assistant messages to A2A Artifacts.
-func CrushMessagesToA2AArtifacts(messages []crush.Message) []a2a.Artifact {
-	artifacts := make([]a2a.Artifact, 0)
+// CrushMessagesToA2AArtifacts converts Crush assistant messages to SDK Artifacts.
+func CrushMessagesToA2AArtifacts(messages []crush.Message) []*a2a.Artifact {
+	artifacts := make([]*a2a.Artifact, 0)
 	for _, msg := range messages {
 		if msg.Role != crush.RoleAssistant {
 			continue
@@ -47,28 +30,16 @@ func CrushMessagesToA2AArtifacts(messages []crush.Message) []a2a.Artifact {
 		if len(parts) == 0 {
 			continue
 		}
-		artifacts = append(artifacts, a2a.Artifact{
-			ArtifactID: uuid.New().String(),
-			Parts:      parts,
+		artifacts = append(artifacts, &a2a.Artifact{
+			ID:    a2a.NewArtifactID(),
+			Parts: parts,
 		})
 	}
 	return artifacts
 }
 
-// CrushMessageToA2AArtifact converts a single Crush message to an A2A Artifact.
-func CrushMessageToA2AArtifact(msg *crush.Message) *a2a.Artifact {
-	parts := crushPartsToA2AParts(msg.Parts)
-	if len(parts) == 0 {
-		return nil
-	}
-	return &a2a.Artifact{
-		ArtifactID: uuid.New().String(),
-		Parts:      parts,
-	}
-}
-
-// CrushFinishToA2AState maps a Crush finish reason to an A2A task state.
-func CrushFinishToA2AState(reason crush.FinishReason) string {
+// CrushFinishToA2AState maps a Crush finish reason to an SDK TaskState.
+func CrushFinishToA2AState(reason crush.FinishReason) a2a.TaskState {
 	switch reason {
 	case crush.FinishEndTurn:
 		return a2a.TaskStateCompleted
@@ -81,18 +52,11 @@ func CrushFinishToA2AState(reason crush.FinishReason) string {
 	}
 }
 
-// Now returns a formatted timestamp.
-func Now() string {
-	return time.Now().UTC().Format(time.RFC3339)
-}
-
-func crushPartsToA2AParts(parts []crush.ContentPart) []a2a.Part {
-	out := make([]a2a.Part, 0, len(parts))
+func crushPartsToA2AParts(parts []crush.ContentPart) a2a.ContentParts {
+	out := make(a2a.ContentParts, 0, len(parts))
 	for _, p := range parts {
 		if p.Text != nil && p.Text.Text != "" {
-			out = append(out, a2a.Part{
-				Text: p.Text.Text,
-			})
+			out = append(out, a2a.NewTextPart(p.Text.Text))
 		}
 	}
 	return out
