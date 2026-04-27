@@ -109,7 +109,6 @@ func (s *Server) handleSendStreamingMessage(w http.ResponseWriter, r *http.Reque
 		WorkspaceID: wsID,
 		SessionID:   sess.ID,
 		Task: &a2a.Task{
-			Kind:      "task",
 			ID:        taskID,
 			ContextID: contextID,
 			Status: a2a.TaskStatus{

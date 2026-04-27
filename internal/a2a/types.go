@@ -4,12 +4,21 @@ import "encoding/json"
 
 // AgentCard is the A2A v1.0 agent discovery response.
 type AgentCard struct {
-	Name         string        `json:"name"`
-	Version      string        `json:"version"`
-	URL          string        `json:"url"`
-	Description  string        `json:"description,omitempty"`
-	Capabilities *Capabilities `json:"capabilities,omitempty"`
-	Skills       []Skill       `json:"skills"`
+	Name                string               `json:"name"`
+	Version             string               `json:"version"`
+	Description         string               `json:"description,omitempty"`
+	Capabilities        *Capabilities        `json:"capabilities,omitempty"`
+	Skills              []Skill              `json:"skills"`
+	SupportedInterfaces []SupportedInterface `json:"supportedInterfaces"`
+	DefaultInputModes   []string             `json:"defaultInputModes"`
+	DefaultOutputModes  []string             `json:"defaultOutputModes"`
+}
+
+// SupportedInterface describes a protocol interface the agent supports.
+type SupportedInterface struct {
+	URL             string `json:"url"`
+	ProtocolBinding string `json:"protocolBinding"`
+	ProtocolVersion string `json:"protocolVersion"`
 }
 
 // Capabilities declares what the agent supports.
@@ -28,9 +37,15 @@ type Skill struct {
 	Examples    []string `json:"examples,omitempty"`
 }
 
+// Role constants for A2A v1.0 proto enum names.
+const (
+	RoleUser  = "ROLE_USER"
+	RoleAgent = "ROLE_AGENT"
+)
+
 // Message is an A2A message.
 type Message struct {
-	Kind      string `json:"kind"`
+	Kind      string `json:"kind,omitempty"`
 	MessageID string `json:"messageId"`
 	Role      string `json:"role"`
 	Parts     []Part `json:"parts"`
@@ -39,16 +54,16 @@ type Message struct {
 }
 
 // Part is a union type for message parts.
+// v1.0 uses member-based polymorphism (no "kind" discriminator).
+// A text part is just {"text": "Hello"}, a file part has {"file": {...}}, etc.
 type Part struct {
-	Kind string `json:"kind"`
-
-	// TextPart fields
+	// Text part field
 	Text string `json:"text,omitempty"`
 
-	// FilePart fields
+	// File part field
 	File *FileContent `json:"file,omitempty"`
 
-	// DataPart fields
+	// Data part field
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
@@ -62,7 +77,6 @@ type FileContent struct {
 
 // Task is an A2A task.
 type Task struct {
-	Kind      string     `json:"kind"`
 	ID        string     `json:"id"`
 	ContextID string     `json:"contextId"`
 	Status    TaskStatus `json:"status"`
@@ -88,7 +102,7 @@ type Artifact struct {
 
 // TaskStatusUpdateEvent is an SSE event for status changes.
 type TaskStatusUpdateEvent struct {
-	Kind      string     `json:"kind"`
+	Kind      string     `json:"kind,omitempty"`
 	TaskID    string     `json:"taskId"`
 	ContextID string     `json:"contextId"`
 	Status    TaskStatus `json:"status"`
@@ -97,10 +111,17 @@ type TaskStatusUpdateEvent struct {
 
 // TaskArtifactUpdateEvent is an SSE event for artifact updates.
 type TaskArtifactUpdateEvent struct {
-	Kind      string   `json:"kind"`
+	Kind      string   `json:"kind,omitempty"`
 	TaskID    string   `json:"taskId"`
 	ContextID string   `json:"contextId"`
 	Artifact  Artifact `json:"artifact"`
+}
+
+// SendMessageResult wraps the response for SendMessage as per v1.0 proto.
+// The oneof is: { task: Task } or { message: Message }.
+type SendMessageResult struct {
+	Task    *Task    `json:"task,omitempty"`
+	Message *Message `json:"message,omitempty"`
 }
 
 // SendMessageParams is the params for SendMessage / SendStreamingMessage.

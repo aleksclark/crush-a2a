@@ -11,7 +11,6 @@ func (s *Server) handleAgentCard(w http.ResponseWriter, r *http.Request) {
 	card := a2a.AgentCard{
 		Name:        "crush",
 		Version:     "1.0.0",
-		URL:         s.BaseURL,
 		Description: "Crush AI assistant exposed via A2A v1.0 protocol",
 		Capabilities: &a2a.Capabilities{
 			Streaming:              true,
@@ -26,6 +25,15 @@ func (s *Server) handleAgentCard(w http.ResponseWriter, r *http.Request) {
 				Tags:        []string{"general", "coding", "assistant"},
 			},
 		},
+		SupportedInterfaces: []a2a.SupportedInterface{
+			{
+				URL:             s.BaseURL,
+				ProtocolBinding: "JSONRPC",
+				ProtocolVersion: "1.0",
+			},
+		},
+		DefaultInputModes:  []string{"text/plain"},
+		DefaultOutputModes: []string{"text/plain"},
 	}
 
 	w.Header().Set("Content-Type", "application/json")

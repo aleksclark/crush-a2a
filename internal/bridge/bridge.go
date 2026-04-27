@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"strings"
 	"time"
 
 	"github.com/aleksclark/crush-a2a/internal/a2a"
@@ -8,11 +9,24 @@ import (
 	"github.com/google/uuid"
 )
 
+// NormalizeRole accepts both v0.3 ("user"/"agent") and v1.0 ("ROLE_USER"/"ROLE_AGENT")
+// role names on input and returns the canonical v1.0 form.
+func NormalizeRole(role string) string {
+	switch strings.ToLower(role) {
+	case "user", "role_user":
+		return a2a.RoleUser
+	case "agent", "role_agent":
+		return a2a.RoleAgent
+	default:
+		return role
+	}
+}
+
 // ExtractPromptText extracts the plain text from A2A message parts.
 func ExtractPromptText(parts []a2a.Part) string {
 	var text string
 	for _, p := range parts {
-		if p.Kind == "text" {
+		if p.Text != "" {
 			if text != "" {
 				text += "\n"
 			}
@@ -77,7 +91,6 @@ func crushPartsToA2AParts(parts []crush.ContentPart) []a2a.Part {
 	for _, p := range parts {
 		if p.Text != nil && p.Text.Text != "" {
 			out = append(out, a2a.Part{
-				Kind: "text",
 				Text: p.Text.Text,
 			})
 		}

@@ -89,10 +89,9 @@ func StreamAdapter(ctx context.Context, r io.Reader, w *SSEWriter, taskID, conte
 				var statusMsg *a2a.Message
 				if finish.Message != "" {
 					statusMsg = &a2a.Message{
-						Kind:      "message",
 						MessageID: uuid.New().String(),
-						Role:      "agent",
-						Parts:     []a2a.Part{{Kind: "text", Text: finish.Message}},
+						Role:      a2a.RoleAgent,
+						Parts:     []a2a.Part{{Text: finish.Message}},
 					}
 				}
 				return w.WriteEvent(a2a.TaskStatusUpdateEvent{

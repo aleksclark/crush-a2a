@@ -126,7 +126,6 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request, req a
 	artifacts := bridge.CrushMessagesToA2AArtifacts(messages)
 
 	task := &a2a.Task{
-		Kind:      "task",
 		ID:        taskID,
 		ContextID: contextID,
 		Status: a2a.TaskStatus{
@@ -138,10 +137,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request, req a
 
 	if finishMsg != "" {
 		task.Status.Message = &a2a.Message{
-			Kind:      "message",
 			MessageID: uuid.New().String(),
-			Role:      "agent",
-			Parts:     []a2a.Part{{Kind: "text", Text: finishMsg}},
+			Role:      a2a.RoleAgent,
+			Parts:     []a2a.Part{{Text: finishMsg}},
 		}
 	}
 
@@ -159,5 +157,5 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request, req a
 		"artifacts", len(task.Artifacts),
 	)
 
-	writeJSONRPCResponse(w, a2a.NewJSONRPCResponse(req.ID, task))
+	writeJSONRPCResponse(w, a2a.NewJSONRPCResponse(req.ID, a2a.SendMessageResult{Task: task}))
 }
