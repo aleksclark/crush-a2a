@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/aleksclark/crush-a2a/internal/a2a"
-	"github.com/aleksclark/crush-a2a/internal/acp"
 	"github.com/aleksclark/crush-a2a/internal/bridge"
+	"github.com/aleksclark/crush-a2a/internal/crush"
 	"github.com/google/uuid"
 )
 
@@ -20,7 +20,11 @@ func (s *Server) handleSendStreamingMessage(w http.ResponseWriter, r *http.Reque
 	}
 
 	msg := params.Message
-	acpMessages := bridge.A2AMessageToACPMessages(msg)
+	prompt := bridge.ExtractPromptText(msg.Parts)
+	if prompt == "" {
+		writeJSONRPCError(w, a2a.ErrInvalidParams(req.ID, "empty prompt"))
+		return
+	}
 
 	contextID := msg.ContextID
 	if contextID == "" {
@@ -32,14 +36,26 @@ func (s *Server) handleSendStreamingMessage(w http.ResponseWriter, r *http.Reque
 		taskID = uuid.New().String()
 	}
 
-	s.Logger.Info("SendStreamingMessage", "task_id", taskID, "context_id", contextID)
-
-	createReq := acp.CreateRunRequest{
-		AgentName: s.AgentName,
-		Input:     acpMessages,
-		SessionID: contextID,
-		Mode:      "stream",
+	wsID, err := s.ensureWorkspace(r)
+	if err != nil {
+		s.Logger.Error("failed to ensure workspace", "error", err)
+		writeJSONRPCError(w, a2a.ErrInternalError(req.ID, err.Error()))
+		return
 	}
+
+	sess, err := s.Crush.CreateSession(r.Context(), wsID, "A2A stream "+taskID)
+	if err != nil {
+		s.Logger.Error("failed to create session", "error", err)
+		writeJSONRPCError(w, a2a.ErrInternalError(req.ID, err.Error()))
+		return
+	}
+
+	s.Logger.Info("SendStreamingMessage",
+		"task_id", taskID,
+		"context_id", contextID,
+		"workspace_id", wsID,
+		"session_id", sess.ID,
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -49,13 +65,23 @@ func (s *Server) handleSendStreamingMessage(w http.ResponseWriter, r *http.Reque
 		cancel()
 	}()
 
-	stream, err := s.ACPClient.CreateRunStream(ctx, createReq)
+	sseStream, err := s.Crush.SubscribeEvents(ctx, wsID)
 	if err != nil {
-		s.Logger.Error("ACP CreateRunStream failed", "error", err)
+		s.Logger.Error("failed to subscribe to events", "error", err)
 		writeJSONRPCError(w, a2a.ErrInternalError(req.ID, err.Error()))
 		return
 	}
-	defer stream.Close()
+	defer sseStream.Close()
+
+	err = s.Crush.SendMessage(ctx, wsID, crush.AgentMessage{
+		SessionID: sess.ID,
+		Prompt:    prompt,
+	})
+	if err != nil {
+		s.Logger.Error("failed to send message", "error", err)
+		writeJSONRPCError(w, a2a.ErrInternalError(req.ID, err.Error()))
+		return
+	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -72,14 +98,16 @@ func (s *Server) handleSendStreamingMessage(w http.ResponseWriter, r *http.Reque
 
 	sse := &bridge.SSEWriter{W: w, Flusher: flusher}
 
-	err = bridge.StreamAdapter(ctx, stream, sse, taskID, contextID, s.Logger)
+	err = bridge.StreamAdapter(ctx, sseStream, sse, taskID, contextID, sess.ID, s.Logger)
 	if err != nil {
 		s.Logger.Error("stream adapter error", "error", err)
 	}
 
 	s.Store.Put(&bridge.TaskEntry{
-		TaskID:    taskID,
-		ContextID: contextID,
+		TaskID:      taskID,
+		ContextID:   contextID,
+		WorkspaceID: wsID,
+		SessionID:   sess.ID,
 		Task: &a2a.Task{
 			Kind:      "task",
 			ID:        taskID,

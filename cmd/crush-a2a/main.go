@@ -12,8 +12,8 @@ import (
 
 func main() {
 	port := flag.Int("port", 8200, "HTTP listen port")
-	acpURL := flag.String("acp-url", "http://localhost:8199", "Crush ACP backend URL")
-	agentName := flag.String("agent-name", "crush", "ACP agent name to proxy")
+	crushAddr := flag.String("crush-addr", "tcp://localhost:19200", "Crush server address (tcp://host:port or unix:///path)")
+	workspacePath := flag.String("workspace-path", "/tmp/crush-a2a-workspace", "Workspace directory path")
 	verbose := flag.Bool("v", false, "Enable debug logging")
 	flag.Parse()
 
@@ -28,19 +28,23 @@ func main() {
 
 	baseURL := fmt.Sprintf("http://localhost:%d", *port)
 
-	srv := server.New(server.Config{
-		Port:      *port,
-		ACPURL:    *acpURL,
-		AgentName: *agentName,
-		BaseURL:   baseURL,
-		Logger:    logger,
+	srv, err := server.New(server.Config{
+		Port:          *port,
+		CrushAddr:     *crushAddr,
+		WorkspacePath: *workspacePath,
+		BaseURL:       baseURL,
+		Logger:        logger,
 	})
+	if err != nil {
+		logger.Error("failed to create server", "error", err)
+		os.Exit(1)
+	}
 
 	addr := fmt.Sprintf(":%d", *port)
 	logger.Info("starting crush-a2a server",
 		"addr", addr,
-		"acp_url", *acpURL,
-		"agent_name", *agentName,
+		"crush_addr", *crushAddr,
+		"workspace_path", *workspacePath,
 	)
 
 	if err := http.ListenAndServe(addr, srv); err != nil {

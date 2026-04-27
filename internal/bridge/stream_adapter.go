@@ -9,7 +9,7 @@ import (
 	"net/http"
 
 	"github.com/aleksclark/crush-a2a/internal/a2a"
-	"github.com/aleksclark/crush-a2a/internal/acp"
+	"github.com/aleksclark/crush-a2a/internal/crush"
 	"github.com/google/uuid"
 )
 
@@ -20,7 +20,7 @@ type SSEWriter struct {
 }
 
 // WriteEvent writes a single SSE data event and flushes.
-func (s *SSEWriter) WriteEvent(v interface{}) error {
+func (s *SSEWriter) WriteEvent(v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("SSE marshal: %w", err)
@@ -35,108 +35,86 @@ func (s *SSEWriter) WriteEvent(v interface{}) error {
 	return nil
 }
 
-// StreamAdapter reads ACP NDJSON events and writes A2A SSE events.
-func StreamAdapter(ctx context.Context, r io.Reader, w *SSEWriter, taskID, contextID string, logger *slog.Logger) error {
-	artifactCounter := 0
-	return acp.ReadNDJSON(ctx, r, func(ev acp.Event) error {
-		logger.Debug("stream event received", "type", ev.Type)
+// StreamAdapter reads Crush SSE events and writes A2A SSE events.
+func StreamAdapter(ctx context.Context, r io.Reader, w *SSEWriter, taskID, contextID, sessionID string, logger *slog.Logger) error {
+	sentWorking := false
 
-		switch ev.Type {
-		case "run.created":
-			return w.WriteEvent(a2a.TaskStatusUpdateEvent{
-				Kind:      "status-update",
-				TaskID:    taskID,
-				ContextID: contextID,
-				Status: a2a.TaskStatus{
-					State:     a2a.TaskStateSubmitted,
-					Timestamp: Now(),
-				},
-			})
-
-		case "run.in-progress":
-			return w.WriteEvent(a2a.TaskStatusUpdateEvent{
-				Kind:      "status-update",
-				TaskID:    taskID,
-				ContextID: contextID,
-				Status: a2a.TaskStatus{
-					State:     a2a.TaskStateWorking,
-					Timestamp: Now(),
-				},
-			})
-
-		case "message.part":
-			if ev.Part == nil {
-				logger.Debug("message.part event with nil part, skipping")
+	return crush.ReadSSE(ctx, r, func(payload crush.SSEPayload) error {
+		switch payload.Type {
+		case crush.PayloadTypeMessage:
+			var ev crush.SSEEvent[crush.Message]
+			if err := json.Unmarshal(payload.Payload, &ev); err != nil {
+				logger.Debug("failed to decode message event", "error", err)
 				return nil
 			}
-			artifactCounter++
-			parts := ACPPartsToA2AParts([]acp.MessagePart{
-				{
-					ContentType:     ev.Part.ContentType,
-					Content:         ev.Part.Content,
-					ContentEncoding: ev.Part.ContentEncoding,
-				},
-			})
-			logger.Debug("emitting artifact-update", "artifact_num", artifactCounter, "parts_count", len(parts))
-			return w.WriteEvent(a2a.TaskArtifactUpdateEvent{
-				Kind:      "artifact-update",
-				TaskID:    taskID,
-				ContextID: contextID,
-				Artifact: a2a.Artifact{
-					ArtifactID: uuid.New().String(),
-					Parts:      parts,
-					Append:     artifactCounter > 1,
-					LastChunk:  false,
-				},
-			})
 
-		case "run.completed":
-			return w.WriteEvent(a2a.TaskStatusUpdateEvent{
-				Kind:      "status-update",
-				TaskID:    taskID,
-				ContextID: contextID,
-				Status: a2a.TaskStatus{
-					State:     a2a.TaskStateCompleted,
-					Timestamp: Now(),
-				},
-				Final: true,
-			})
-
-		case "run.failed":
-			errMsg := ""
-			if ev.Run != nil {
-				if ev.Run.Error != nil {
-					errMsg = ev.Run.Error.Message
-				}
-				logger.Error("ACP run failed", "run_id", ev.Run.RunID, "error", errMsg)
+			msg := ev.Payload
+			if msg.SessionID != sessionID {
+				return nil
 			}
-			logger.Debug("run.failed raw event", "raw", string(ev.Raw[:min(len(ev.Raw), 500)]))
-			return w.WriteEvent(a2a.TaskStatusUpdateEvent{
-				Kind:      "status-update",
-				TaskID:    taskID,
-				ContextID: contextID,
-				Status: a2a.TaskStatus{
-					State:     a2a.TaskStateFailed,
-					Timestamp: Now(),
-				},
-				Final: true,
-			})
 
-		case "run.cancelled":
-			return w.WriteEvent(a2a.TaskStatusUpdateEvent{
-				Kind:      "status-update",
-				TaskID:    taskID,
-				ContextID: contextID,
-				Status: a2a.TaskStatus{
-					State:     a2a.TaskStateCanceled,
-					Timestamp: Now(),
-				},
-				Final: true,
-			})
+			if msg.Role != crush.RoleAssistant {
+				return nil
+			}
+
+			if !sentWorking {
+				sentWorking = true
+				if err := w.WriteEvent(a2a.TaskStatusUpdateEvent{
+					Kind:      "status-update",
+					TaskID:    taskID,
+					ContextID: contextID,
+					Status: a2a.TaskStatus{
+						State:     a2a.TaskStateWorking,
+						Timestamp: Now(),
+					},
+				}); err != nil {
+					return err
+				}
+			}
+
+			artifact := CrushMessageToA2AArtifact(&msg)
+			if artifact != nil {
+				if err := w.WriteEvent(a2a.TaskArtifactUpdateEvent{
+					Kind:      "artifact-update",
+					TaskID:    taskID,
+					ContextID: contextID,
+					Artifact:  *artifact,
+				}); err != nil {
+					return err
+				}
+			}
+
+			if finish := msg.FinishPart(); finish != nil {
+				state := CrushFinishToA2AState(finish.Reason)
+				var statusMsg *a2a.Message
+				if finish.Message != "" {
+					statusMsg = &a2a.Message{
+						Kind:      "message",
+						MessageID: uuid.New().String(),
+						Role:      "agent",
+						Parts:     []a2a.Part{{Kind: "text", Text: finish.Message}},
+					}
+				}
+				return w.WriteEvent(a2a.TaskStatusUpdateEvent{
+					Kind:      "status-update",
+					TaskID:    taskID,
+					ContextID: contextID,
+					Status: a2a.TaskStatus{
+						State:     state,
+						Timestamp: Now(),
+						Message:   statusMsg,
+					},
+					Final: true,
+				})
+			}
+
+		case crush.PayloadTypeAgentEvent:
+			logger.Debug("agent_event received")
 
 		default:
-			logger.Debug("ignoring ACP event", "type", ev.Type)
-			return nil
+			logger.Debug("ignoring SSE event", "type", payload.Type)
 		}
+
+		return nil
 	})
 }

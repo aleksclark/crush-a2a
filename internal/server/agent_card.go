@@ -9,9 +9,9 @@ import (
 
 func (s *Server) handleAgentCard(w http.ResponseWriter, r *http.Request) {
 	card := a2a.AgentCard{
-		Name:    s.AgentName,
-		Version: "1.0.0",
-		URL:     s.BaseURL,
+		Name:        "crush",
+		Version:     "1.0.0",
+		URL:         s.BaseURL,
 		Description: "Crush AI assistant exposed via A2A v1.0 protocol",
 		Capabilities: &a2a.Capabilities{
 			Streaming:              true,

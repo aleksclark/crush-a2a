@@ -27,10 +27,10 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request, req a2
 		return
 	}
 
-	if entry.RunID != "" {
-		_, err := s.ACPClient.CancelRun(r.Context(), entry.RunID)
-		if err != nil {
-			s.Logger.Error("ACP CancelRun failed", "error", err, "run_id", entry.RunID)
+	if entry.WorkspaceID != "" && entry.SessionID != "" {
+		if err := s.Crush.CancelSession(r.Context(), entry.WorkspaceID, entry.SessionID); err != nil {
+			s.Logger.Error("Crush CancelSession failed", "error", err,
+				"workspace_id", entry.WorkspaceID, "session_id", entry.SessionID)
 		}
 	}
 

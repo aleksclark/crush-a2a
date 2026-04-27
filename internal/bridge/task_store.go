@@ -6,19 +6,19 @@ import (
 	"github.com/aleksclark/crush-a2a/internal/a2a"
 )
 
-// TaskEntry holds the mapping between an A2A task and its ACP run.
+// TaskEntry holds the mapping between an A2A task and its Crush workspace/session.
 type TaskEntry struct {
-	TaskID    string
-	ContextID string
-	RunID     string
-	SessionID string
-	Task      *a2a.Task
+	TaskID      string
+	ContextID   string
+	WorkspaceID string
+	SessionID   string
+	Task        *a2a.Task
 }
 
 // TaskStore is a concurrent-safe in-memory store for task state.
 type TaskStore struct {
 	mu    sync.RWMutex
-	tasks map[string]*TaskEntry // keyed by A2A task ID
+	tasks map[string]*TaskEntry
 }
 
 // NewTaskStore creates a new task store.
