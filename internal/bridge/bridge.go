@@ -125,7 +125,7 @@ func ACPStatusToA2AState(status string) string {
 
 // RunToTask converts an ACP Run into an A2A Task.
 func RunToTask(run *acp.Run, taskID, contextID string) *a2a.Task {
-	return &a2a.Task{
+	task := &a2a.Task{
 		Kind:      "task",
 		ID:        taskID,
 		ContextID: contextID,
@@ -135,6 +135,15 @@ func RunToTask(run *acp.Run, taskID, contextID string) *a2a.Task {
 		},
 		Artifacts: ACPMessagesToA2AArtifacts(run.Output),
 	}
+	if run.Error != nil && run.Error.Message != "" {
+		task.Status.Message = &a2a.Message{
+			Role: "agent",
+			Parts: []a2a.Part{
+				{Kind: "text", Text: run.Error.Message},
+			},
+		}
+	}
+	return task
 }
 
 // Now returns a formatted timestamp.

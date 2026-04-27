@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -13,6 +14,7 @@ import (
 func (s *Server) handleSendStreamingMessage(w http.ResponseWriter, r *http.Request, req a2a.JSONRPCRequest) {
 	var params a2a.SendMessageParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
+		s.Logger.Error("failed to parse SendStreamingMessage params", "error", err)
 		writeJSONRPCError(w, a2a.ErrInvalidParams(req.ID, err.Error()))
 		return
 	}
@@ -30,6 +32,8 @@ func (s *Server) handleSendStreamingMessage(w http.ResponseWriter, r *http.Reque
 		taskID = uuid.New().String()
 	}
 
+	s.Logger.Info("SendStreamingMessage", "task_id", taskID, "context_id", contextID)
+
 	createReq := acp.CreateRunRequest{
 		AgentName: s.AgentName,
 		Input:     acpMessages,
@@ -37,7 +41,15 @@ func (s *Server) handleSendStreamingMessage(w http.ResponseWriter, r *http.Reque
 		Mode:      "stream",
 	}
 
-	stream, err := s.ACPClient.CreateRunStream(r.Context(), createReq)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		<-r.Context().Done()
+		cancel()
+	}()
+
+	stream, err := s.ACPClient.CreateRunStream(ctx, createReq)
 	if err != nil {
 		s.Logger.Error("ACP CreateRunStream failed", "error", err)
 		writeJSONRPCError(w, a2a.ErrInternalError(req.ID, err.Error()))
@@ -45,24 +57,25 @@ func (s *Server) handleSendStreamingMessage(w http.ResponseWriter, r *http.Reque
 	}
 	defer stream.Close()
 
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		s.Logger.Error("response writer does not support flushing")
+		writeJSONRPCError(w, a2a.ErrInternalError(req.ID, "streaming not supported"))
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		s.Logger.Error("response writer does not support flushing")
-		return
-	}
+	sse := &bridge.SSEWriter{W: w, Flusher: flusher}
 
-	sse := &bridge.SSEWriter{W: w}
-
-	err = bridge.StreamAdapter(r.Context(), stream, sse, taskID, contextID, s.Logger)
+	err = bridge.StreamAdapter(ctx, stream, sse, taskID, contextID, s.Logger)
 	if err != nil {
 		s.Logger.Error("stream adapter error", "error", err)
 	}
-	flusher.Flush()
 
 	s.Store.Put(&bridge.TaskEntry{
 		TaskID:    taskID,

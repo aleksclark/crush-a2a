@@ -14,10 +14,16 @@ func main() {
 	port := flag.Int("port", 8200, "HTTP listen port")
 	acpURL := flag.String("acp-url", "http://localhost:8199", "Crush ACP backend URL")
 	agentName := flag.String("agent-name", "crush", "ACP agent name to proxy")
+	verbose := flag.Bool("v", false, "Enable debug logging")
 	flag.Parse()
 
+	level := slog.LevelInfo
+	if *verbose {
+		level = slog.LevelDebug
+	}
+
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: level,
 	}))
 
 	baseURL := fmt.Sprintf("http://localhost:%d", *port)

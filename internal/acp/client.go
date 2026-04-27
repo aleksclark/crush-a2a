@@ -102,13 +102,17 @@ func (c *Client) CreateRun(ctx context.Context, r CreateRunRequest) (*Run, error
 		return nil, err
 	}
 	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("create run: read body: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("create run: status %d: %s", resp.StatusCode, string(respBody))
 	}
+	c.Logger.Debug("ACP CreateRun response", "status", resp.StatusCode, "body_len", len(respBody))
 	var run Run
-	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
-		return nil, err
+	if err := json.Unmarshal(respBody, &run); err != nil {
+		return nil, fmt.Errorf("create run: decode: %w (body: %s)", err, string(respBody[:min(len(respBody), 200)]))
 	}
 	return &run, nil
 }
@@ -136,6 +140,7 @@ func (c *Client) CreateRunStream(ctx context.Context, r CreateRunRequest) (io.Re
 		resp.Body.Close()
 		return nil, fmt.Errorf("create run stream: status %d: %s", resp.StatusCode, string(respBody))
 	}
+	c.Logger.Debug("ACP stream opened", "status", resp.StatusCode, "content_type", resp.Header.Get("Content-Type"))
 	return resp.Body, nil
 }
 
@@ -185,6 +190,7 @@ func (c *Client) CancelRun(ctx context.Context, runID string) (*Run, error) {
 // It returns when the reader is exhausted or the context is canceled.
 func ReadNDJSON(ctx context.Context, r io.Reader, fn func(Event) error) error {
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 	for scanner.Scan() {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -195,8 +201,9 @@ func ReadNDJSON(ctx context.Context, r io.Reader, fn func(Event) error) error {
 		}
 		var ev Event
 		if err := json.Unmarshal(line, &ev); err != nil {
-			return fmt.Errorf("parse NDJSON event: %w", err)
+			return fmt.Errorf("parse NDJSON event: %w (line: %s)", err, string(line[:min(len(line), 200)]))
 		}
+		ev.Raw = json.RawMessage(append([]byte(nil), line...))
 		if err := fn(ev); err != nil {
 			return err
 		}

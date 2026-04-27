@@ -1,5 +1,7 @@
 package acp
 
+import "encoding/json"
+
 // AgentManifest describes an ACP agent.
 type AgentManifest struct {
 	Name        string `json:"name"`
@@ -25,6 +27,12 @@ type Message struct {
 	Parts []MessagePart `json:"parts"`
 }
 
+// RunError represents an error from an ACP run.
+type RunError struct {
+	Message string `json:"message"`
+	Code    string `json:"code,omitempty"`
+}
+
 // Run represents an ACP run.
 type Run struct {
 	AgentName string    `json:"agent_name"`
@@ -32,6 +40,7 @@ type Run struct {
 	SessionID string    `json:"session_id"`
 	Status    string    `json:"status"`
 	Output    []Message `json:"output,omitempty"`
+	Error     *RunError `json:"error,omitempty"`
 }
 
 // CreateRunRequest is the body for POST /runs.
@@ -44,11 +53,16 @@ type CreateRunRequest struct {
 
 // Event is a single NDJSON event from the ACP streaming endpoint.
 type Event struct {
-	Type string `json:"type"`
-	Run  *Run   `json:"run,omitempty"`
-	Part *struct {
-		ContentType     string `json:"content_type"`
-		Content         string `json:"content"`
-		ContentEncoding string `json:"content_encoding,omitempty"`
-	} `json:"part,omitempty"`
+	Type    string          `json:"type"`
+	Run     *Run            `json:"run,omitempty"`
+	Part    *StreamPart     `json:"part,omitempty"`
+	Message *Message        `json:"message,omitempty"`
+	Raw     json.RawMessage `json:"-"`
+}
+
+// StreamPart represents a streaming message part.
+type StreamPart struct {
+	ContentType     string `json:"content_type"`
+	Content         string `json:"content"`
+	ContentEncoding string `json:"content_encoding,omitempty"`
 }
