@@ -110,12 +110,12 @@ type SendMessageParams struct {
 
 // GetTaskParams is the params for GetTask.
 type GetTaskParams struct {
-	TaskID string `json:"taskId"`
+	TaskID string `json:"id"`
 }
 
 // CancelTaskParams is the params for CancelTask.
 type CancelTaskParams struct {
-	TaskID string `json:"taskId"`
+	TaskID string `json:"id"`
 }
 
 // Task state constants.
